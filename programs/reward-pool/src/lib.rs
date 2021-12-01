@@ -12,15 +12,15 @@ declare_id!("TeSTKchdpa2FKNV6gYNAENpququb3aT2r1pD41tZw36");
 
 #[cfg(not(feature = "local-testing"))]
 mod constants {
-    pub const X_STEP_TOKEN_MINT_PUBKEY: &str = "xStpgUCss9piqeFUk2iLVcvJEGhAdJxJQuwLkXP555G";
-    pub const X_STEP_DEPOSIT_REQUIREMENT: u64 = 10_000_000_000_000;
+    pub const DEPOSIT_TOKEN_MINT_PUBKEY: &str = "xStpgUCss9piqeFUk2iLVcvJEGhAdJxJQuwLkXP555G";
+    pub const TOKEN_DEPOSIT_REQUIREMENT: u64 = 10_000_000_000_000;
     pub const MIN_DURATION: u64 = 86400;
 }
 
 #[cfg(feature = "local-testing")]
 mod constants {
-    pub const X_STEP_TOKEN_MINT_PUBKEY: &str = "tEsTL8G8drugWztoCKrPpEAXV21qEajfHg4q45KYs6s";
-    pub const X_STEP_DEPOSIT_REQUIREMENT: u64 = 10_000_000_000_000;
+    pub const DEPOSIT_TOKEN_MINT_PUBKEY: &str = "tEsTL8G8drugWztoCKrPpEAXV21qEajfHg4q45KYs6s";
+    pub const TOKEN_DEPOSIT_REQUIREMENT: u64 = 10_000_000_000_000;
     pub const MIN_DURATION: u64 = 1;
 }
 
@@ -123,7 +123,7 @@ pub mod reward_pool {
             return Err(ErrorCode::DurationTooShort.into());
         }
 
-        //xstep lockup
+        // token lockup
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             token::Transfer {
@@ -132,7 +132,7 @@ pub mod reward_pool {
                 authority: ctx.accounts.x_token_deposit_authority.to_account_info(),
             },
         );
-        token::transfer(cpi_ctx, constants::X_STEP_DEPOSIT_REQUIREMENT)?;
+        token::transfer(cpi_ctx, constants::TOKEN_DEPOSIT_REQUIREMENT)?;
 
         let pool = &mut ctx.accounts.pool;
 
@@ -173,7 +173,7 @@ pub mod reward_pool {
         let pool = &mut ctx.accounts.pool;
         pool.paused = true;
 
-        //xstep refund
+        // token refund
         let seeds = &[
             pool.to_account_info().key.as_ref(),
             &[pool.nonce],
@@ -214,7 +214,7 @@ pub mod reward_pool {
         //the prior token vault was closed when pausing
         pool.x_token_pool_vault = ctx.accounts.x_token_pool_vault.key();
 
-        //xstep lockup
+        // token lockup
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             token::Transfer {
@@ -530,13 +530,13 @@ pub struct InitializePool<'info> {
 
     #[account(
         mut,
-        constraint = x_token_pool_vault.mint == X_STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+        constraint = x_token_pool_vault.mint == DEPOSIT_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
         constraint = x_token_pool_vault.owner == pool_signer.key(),
     )]
     x_token_pool_vault: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = x_token_depositor.mint == X_STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap()
+        constraint = x_token_depositor.mint == DEPOSIT_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap()
     )]
     x_token_depositor: Box<Account<'info, TokenAccount>>,
     x_token_deposit_authority: Signer<'info>,
@@ -633,13 +633,13 @@ pub struct Pause<'info> {
 pub struct Unpause<'info> {
     #[account(
         mut,
-        constraint = x_token_pool_vault.mint == X_STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+        constraint = x_token_pool_vault.mint == DEPOSIT_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
         constraint = x_token_pool_vault.owner == pool_signer.key(),
     )]
     x_token_pool_vault: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = x_token_depositor.mint == X_STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap()
+        constraint = x_token_depositor.mint == DEPOSIT_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap()
     )]
     x_token_depositor: Box<Account<'info, TokenAccount>>,
     x_token_deposit_authority: Signer<'info>,
@@ -862,7 +862,7 @@ pub struct Pool {
     pub nonce: u8,
     /// Paused state of the program
     pub paused: bool,
-    /// The vault holding users' xSTEP
+    /// The vault holding users' SLP tokens
     pub x_token_pool_vault: Pubkey,
     /// Mint of the token that can be staked.
     pub staking_mint: Pubkey,
