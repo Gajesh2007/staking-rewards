@@ -43,16 +43,6 @@ pub fn update_rewards(
         pool.reward_a_rate,
     );
 
-    if pool.reward_a_vault != pool.reward_b_vault {
-        pool.reward_b_per_token_stored = reward_per_token(
-            total_staked,
-            pool.reward_b_per_token_stored,
-            last_time_reward_applicable,
-            pool.last_update_time,
-            pool.reward_b_rate,
-        );
-    }
-
     pool.last_update_time = last_time_reward_applicable;
 
     if let Some(u) = user {
@@ -63,14 +53,6 @@ pub fn update_rewards(
             u.reward_a_per_token_pending,
         );
         u.reward_a_per_token_complete = pool.reward_a_per_token_stored;
-
-        u.reward_b_per_token_pending = earned(
-            u.balance_staked,
-            pool.reward_b_per_token_stored,
-            u.reward_b_per_token_complete,
-            u.reward_b_per_token_pending,
-        );
-        u.reward_b_per_token_complete = pool.reward_b_per_token_stored;
     }
     
     Ok(())
@@ -162,15 +144,11 @@ pub mod reward_pool {
         pool.staking_vault = ctx.accounts.staking_vault.key();
         pool.reward_a_mint = ctx.accounts.reward_a_mint.key();
         pool.reward_a_vault = ctx.accounts.reward_a_vault.key();
-        pool.reward_b_mint = ctx.accounts.reward_b_mint.key();
-        pool.reward_b_vault = ctx.accounts.reward_b_vault.key();
         pool.reward_duration = reward_duration;
         pool.reward_duration_end = 0;
         pool.last_update_time = 0;
         pool.reward_a_rate = 0;
-        pool.reward_b_rate = 0;
         pool.reward_a_per_token_stored = 0;
-        pool.reward_b_per_token_stored = 0;
         pool.user_stake_count = 0;
         
         Ok(())
@@ -181,9 +159,7 @@ pub mod reward_pool {
         user.pool = *ctx.accounts.pool.to_account_info().key;
         user.owner = *ctx.accounts.owner.key;
         user.reward_a_per_token_complete = 0;
-        user.reward_b_per_token_complete = 0;
         user.reward_a_per_token_pending = 0;
-        user.reward_b_per_token_pending = 0;
         user.balance_staked = 0;
         user.nonce = nonce;
 
@@ -363,12 +339,7 @@ pub mod reward_pool {
         Ok(())
     }
 
-    pub fn fund(ctx: Context<Fund>, amount_a: u64, amount_b: u64) -> Result<()> {
-
-        //if vault a and b are the same, we just use a
-        if amount_b > 0 && ctx.accounts.reward_a_vault.key() == ctx.accounts.reward_b_vault.key() {
-            return Err(ErrorCode::SingleStakeTokenBCannotBeFunded.into());
-        }
+    pub fn fund(ctx: Context<Fund>, amount_a: u64) -> Result<()> {
 
         let pool = &mut ctx.accounts.pool;
         let total_staked = ctx.accounts.staking_vault.amount;
@@ -385,19 +356,12 @@ pub mod reward_pool {
 
         if current_time >= reward_period_end {
             pool.reward_a_rate = amount_a.checked_div(pool.reward_duration).unwrap();
-            pool.reward_b_rate = amount_b.checked_div(pool.reward_duration).unwrap();
         } else {
             let remaining = pool.reward_duration_end.checked_sub(current_time).unwrap();
             let leftover_a = remaining.checked_mul(pool.reward_a_rate).unwrap();
-            let leftover_b = remaining.checked_mul(pool.reward_b_rate).unwrap();
 
             pool.reward_a_rate = amount_a
                 .checked_add(leftover_a)
-                .unwrap()
-                .checked_div(pool.reward_duration)
-                .unwrap();
-            pool.reward_b_rate = amount_b
-                .checked_add(leftover_b)
                 .unwrap()
                 .checked_div(pool.reward_duration)
                 .unwrap();
@@ -415,20 +379,6 @@ pub mod reward_pool {
             );
 
             token::transfer(cpi_ctx, amount_a)?;
-        }
-
-        // Transfer reward B tokens into the B vault.
-        if amount_b > 0 {
-            let cpi_ctx = CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                token::Transfer {
-                    from: ctx.accounts.from_b.to_account_info(),
-                    to: ctx.accounts.reward_b_vault.to_account_info(),
-                    authority: ctx.accounts.funder.to_account_info(),
-                },
-            );
-
-            token::transfer(cpi_ctx, amount_b)?;
         }
 
         pool.last_update_time = current_time;
@@ -469,29 +419,6 @@ pub mod reward_pool {
                     token::Transfer {
                         from: ctx.accounts.reward_a_vault.to_account_info(),
                         to: ctx.accounts.reward_a_account.to_account_info(),
-                        authority: ctx.accounts.pool_signer.to_account_info(),
-                    },
-                    pool_signer,
-                );
-                token::transfer(cpi_ctx, reward_amount)?;
-            }
-        }
-
-        if ctx.accounts.user.reward_b_per_token_pending > 0 {
-            let mut reward_amount = ctx.accounts.user.reward_b_per_token_pending;
-            let vault_balance = ctx.accounts.reward_b_vault.amount;
-
-            ctx.accounts.user.reward_b_per_token_pending = 0;
-            if vault_balance < reward_amount {
-                reward_amount = vault_balance;
-            }
-
-            if reward_amount > 0 {
-                let cpi_ctx = CpiContext::new_with_signer(
-                    ctx.accounts.token_program.to_account_info(),
-                    token::Transfer {
-                        from: ctx.accounts.reward_b_vault.to_account_info(),
-                        to: ctx.accounts.reward_b_account.to_account_info(),
                         authority: ctx.accounts.pool_signer.to_account_info(),
                     },
                     pool_signer,
@@ -591,45 +518,6 @@ pub mod reward_pool {
             ],
             &[signer_seeds],
         )?;
-        
-        if pool.reward_a_vault != pool.reward_b_vault {
-            //close token b vault
-            let ix = spl_token::instruction::transfer(
-                &spl_token::ID,
-                ctx.accounts.reward_b_vault.to_account_info().key,
-                ctx.accounts.reward_b_refundee.to_account_info().key,
-                ctx.accounts.pool_signer.key,
-                &[ctx.accounts.pool_signer.key],
-                ctx.accounts.reward_b_vault.amount,
-            )?;
-            solana_program::program::invoke_signed(
-                &ix,
-                &[
-                    ctx.accounts.token_program.to_account_info(),
-                    ctx.accounts.reward_b_vault.to_account_info(),
-                    ctx.accounts.reward_b_refundee.to_account_info(),
-                    ctx.accounts.pool_signer.to_account_info(),
-                ],
-                &[signer_seeds],
-            )?;
-            let ix = spl_token::instruction::close_account(
-                &spl_token::ID,
-                ctx.accounts.reward_b_vault.to_account_info().key,
-                ctx.accounts.refundee.key,
-                ctx.accounts.pool_signer.key,
-                &[ctx.accounts.pool_signer.key],
-            )?;
-            solana_program::program::invoke_signed(
-                &ix,
-                &[
-                    ctx.accounts.token_program.to_account_info(),
-                    ctx.accounts.reward_b_vault.to_account_info(),
-                    ctx.accounts.refundee.to_account_info(),
-                    ctx.accounts.pool_signer.to_account_info(),
-                ],
-                &[signer_seeds],
-            )?;
-        }
 
         Ok(())
     }
@@ -671,14 +559,6 @@ pub struct InitializePool<'info> {
         constraint = reward_a_vault.close_authority == COption::None,
     )]
     reward_a_vault: Box<Account<'info, TokenAccount>>,
-
-    reward_b_mint: Box<Account<'info, Mint>>,
-    #[account(
-        constraint = reward_b_vault.mint == reward_b_mint.key(),
-        constraint = reward_b_vault.owner == pool_signer.key(),
-        constraint = reward_b_vault.close_authority == COption::None,
-    )]
-    reward_b_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(
         seeds = [
@@ -843,7 +723,6 @@ pub struct Fund<'info> {
         mut, 
         has_one = staking_vault,
         has_one = reward_a_vault,
-        has_one = reward_b_vault,
         constraint = !pool.paused,
     )]
     pool: Box<Account<'info, Pool>>,
@@ -851,8 +730,6 @@ pub struct Fund<'info> {
     staking_vault: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     reward_a_vault: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
-    reward_b_vault: Box<Account<'info, TokenAccount>>,
     #[account(
         //require signed funder auth - otherwise constant micro fund could hold funds hostage
         constraint = funder.key() == pool.authority || pool.funders.iter().any(|x| *x == funder.key()),
@@ -860,8 +737,6 @@ pub struct Fund<'info> {
     funder: Signer<'info>,
     #[account(mut)]
     from_a: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
-    from_b: Box<Account<'info, TokenAccount>>,
 
     // Program signers.
     #[account(
@@ -883,15 +758,12 @@ pub struct ClaimReward<'info> {
         mut, 
         has_one = staking_vault,
         has_one = reward_a_vault,
-        has_one = reward_b_vault,
     )]
     pool: Box<Account<'info, Pool>>,
     #[account(mut)]
     staking_vault: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     reward_a_vault: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
-    reward_b_vault: Box<Account<'info, TokenAccount>>,
 
     // User.
     #[account(
@@ -908,8 +780,6 @@ pub struct ClaimReward<'info> {
     owner: Signer<'info>,
     #[account(mut)]
     reward_a_account: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
-    reward_b_account: Box<Account<'info, TokenAccount>>,
 
     // Program signers.
     #[account(
@@ -942,7 +812,6 @@ pub struct CloseUser<'info> {
         bump = user.nonce,
         constraint = user.balance_staked == 0,
         constraint = user.reward_a_per_token_pending == 0,
-        constraint = user.reward_b_per_token_pending == 0,
     )]
     user: Account<'info, User>,
     owner: Signer<'info>,
@@ -956,15 +825,12 @@ pub struct ClosePool<'info> {
     staking_refundee: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     reward_a_refundee: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
-    reward_b_refundee: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         close = refundee,
         has_one = authority,
         has_one = staking_vault,
         has_one = reward_a_vault,
-        has_one = reward_b_vault,
         constraint = pool.paused,
         constraint = pool.reward_duration_end > 0,
         constraint = pool.reward_duration_end < sysvar::clock::Clock::get().unwrap().unix_timestamp.try_into().unwrap(),
@@ -978,8 +844,6 @@ pub struct ClosePool<'info> {
     staking_vault: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     reward_a_vault: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
-    reward_b_vault: Box<Account<'info, TokenAccount>>,
     #[account(
         seeds = [
             pool.to_account_info().key.as_ref()
@@ -1008,10 +872,6 @@ pub struct Pool {
     pub reward_a_mint: Pubkey,
     /// Vault to store reward A tokens.
     pub reward_a_vault: Pubkey,
-    /// Mint of the reward A token.
-    pub reward_b_mint: Pubkey,
-    /// Vault to store reward B tokens.
-    pub reward_b_vault: Pubkey,
     /// The period which rewards are linearly distributed.
     pub reward_duration: u64,
     /// The timestamp at which the current reward period ends.
@@ -1020,12 +880,8 @@ pub struct Pool {
     pub last_update_time: u64,
     /// Rate of reward A distribution.
     pub reward_a_rate: u64,
-    /// Rate of reward B distribution.
-    pub reward_b_rate: u64,
     /// Last calculated reward A per pool token.
     pub reward_a_per_token_stored: u128,
-    /// Last calculated reward B per pool token.
-    pub reward_b_per_token_stored: u128,
     /// Users staked
     pub user_stake_count: u32,
     /// authorized funders
@@ -1043,12 +899,8 @@ pub struct User {
     pub owner: Pubkey,
     /// The amount of token A claimed.
     pub reward_a_per_token_complete: u128,
-    /// The amount of token B claimed.
-    pub reward_b_per_token_complete: u128,
     /// The amount of token A pending claim.
     pub reward_a_per_token_pending: u64,
-    /// The amount of token B pending claim.
-    pub reward_b_per_token_pending: u64,
     /// The amount staked.
     pub balance_staked: u64,
     /// Signer nonce.
@@ -1061,8 +913,6 @@ pub enum ErrorCode {
     InsufficientFundUnstake,
     #[msg("Amount must be greater than zero.")]
     AmountMustBeGreaterThanZero,
-    #[msg("Reward B cannot be funded - pool is single stake.")]
-    SingleStakeTokenBCannotBeFunded,
     #[msg("Pool is paused.")]
     PoolPaused,
     #[msg("Duration cannot be shorter than one day.")]
