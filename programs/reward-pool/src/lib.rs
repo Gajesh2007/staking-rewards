@@ -1,22 +1,24 @@
+// importing constants library
 use crate::constants::*;
+
+// importing anchor
 use anchor_lang::prelude::*;
+
+//importing clock for taking note of when the person deposited
 use anchor_lang::solana_program::{sysvar, clock, program_option::COption};
+
+// importing token account standard
 use anchor_spl::token::{self, TokenAccount, Token, Mint};
+
+// importing conversion library - used to convert clock standard (i64 -> u64)
 use std::convert::Into;
 use std::convert::TryInto;
 
-#[cfg(not(feature = "local-testing"))]
-declare_id!("SRwd1XTVscKXu9nMU8f6MfEf9cAzGPmbMe69CFmHvAH");
+// defining the programId of the program (automatically generated)
 #[cfg(feature = "local-testing")]
 declare_id!("TeSTKchdpa2FKNV6gYNAENpququb3aT2r1pD41tZw36");
 
-#[cfg(not(feature = "local-testing"))]
-mod constants {
-    pub const DEPOSIT_TOKEN_MINT_PUBKEY: &str = "xStpgUCss9piqeFUk2iLVcvJEGhAdJxJQuwLkXP555G";
-    pub const TOKEN_DEPOSIT_REQUIREMENT: u64 = 10_000_000_000_000;
-    pub const MIN_DURATION: u64 = 86400;
-}
-
+// pre-definied constant variables
 #[cfg(feature = "local-testing")]
 mod constants {
     pub const DEPOSIT_TOKEN_MINT_PUBKEY: &str = "tEsTL8G8drugWztoCKrPpEAXV21qEajfHg4q45KYs6s";
@@ -862,8 +864,6 @@ pub struct Pool {
     pub nonce: u8,
     /// Paused state of the program
     pub paused: bool,
-    /// The vault holding users' SLP tokens
-    pub x_token_pool_vault: Pubkey,
     /// Mint of the token that can be staked.
     pub staking_mint: Pubkey,
     /// Vault to store staked tokens.
@@ -890,6 +890,7 @@ pub struct Pool {
     pub funders: [Pubkey; 5],
 }
 
+// User Staking Account - mainly used to store pending rewards & balance staked by the user
 #[account]
 #[derive(Default)]
 pub struct User {
@@ -907,6 +908,7 @@ pub struct User {
     pub nonce: u8,
 }
 
+// error code - written here for shortcuts
 #[error]
 pub enum ErrorCode {
     #[msg("Insufficient funds to unstake.")]
